@@ -2,7 +2,10 @@
 
 namespace app\index\controller;
 
+use addons\wechat\model\WechatCaptcha;
 use app\common\controller\Frontend;
+use app\common\library\Ems;
+use app\common\library\Sms;
 use think\Config;
 use think\Cookie;
 use think\Hook;
@@ -14,7 +17,6 @@ use think\Validate;
  */
 class User extends Frontend
 {
-
     protected $layout = 'default';
     protected $noNeedLogin = ['login', 'register', 'third'];
     protected $noNeedRight = ['*'];
@@ -26,11 +28,6 @@ class User extends Frontend
 
         if (!Config::get('fastadmin.usercenter')) {
             $this->error(__('User center already closed'));
-        }
-
-        $ucenter = get_addon_info('ucenter');
-        if ($ucenter && $ucenter['state']) {
-            include ADDON_PATH . 'ucenter' . DS . 'uc.php';
         }
 
         //监听注册登录注销的事件
@@ -81,9 +78,10 @@ class User extends Frontend
      */
     public function register()
     {
-        $url = $this->request->request('url');
-        if ($this->auth->id)
-            $this->success(__('You\'ve logged in, do not login again'), $url);
+        $url = $this->request->request('url', '');
+        if ($this->auth->id) {
+            $this->success(__('You\'ve logged in, do not login again'), $url ? $url : url('user/index'));
+        }
         if ($this->request->isPost()) {
             $username = $this->request->post('username');
             $password = $this->request->post('password');
@@ -96,8 +94,7 @@ class User extends Frontend
                 'password'  => 'require|length:6,30',
                 'email'     => 'require|email',
                 'mobile'    => 'regex:/^1\d{10}$/',
-                'captcha'   => 'require|captcha',
-                '__token__' => 'token',
+                '__token__' => 'require|token',
             ];
 
             $msg = [
@@ -105,8 +102,6 @@ class User extends Frontend
                 'username.length'  => 'Username must be 3 to 30 characters',
                 'password.require' => 'Password can not be empty',
                 'password.length'  => 'Password must be 6 to 30 characters',
-                'captcha.require'  => 'Captcha can not be empty',
-                'captcha.captcha'  => 'Captcha is incorrect',
                 'email'            => 'Email is incorrect',
                 'mobile'           => 'Mobile is incorrect',
             ];
@@ -115,22 +110,32 @@ class User extends Frontend
                 'password'  => $password,
                 'email'     => $email,
                 'mobile'    => $mobile,
-                'captcha'   => $captcha,
                 '__token__' => $token,
             ];
+            //验证码
+            $captchaResult = true;
+            $captchaType = config("fastadmin.user_register_captcha");
+            if ($captchaType) {
+                if ($captchaType == 'mobile') {
+                    $captchaResult = Sms::check($mobile, $captcha, 'register');
+                } elseif ($captchaType == 'email') {
+                    $captchaResult = Ems::check($email, $captcha, 'register');
+                } elseif ($captchaType == 'wechat') {
+                    $captchaResult = WechatCaptcha::check($captcha, 'register');
+                } elseif ($captchaType == 'text') {
+                    $captchaResult = \think\Validate::is($captcha, 'captcha');
+                }
+            }
+            if (!$captchaResult) {
+                $this->error(__('Captcha is incorrect'));
+            }
             $validate = new Validate($rule, $msg);
             $result = $validate->check($data);
             if (!$result) {
                 $this->error(__($validate->getError()), null, ['token' => $this->request->token()]);
             }
             if ($this->auth->register($username, $password, $email, $mobile)) {
-                $synchtml = '';
-                ////////////////同步到Ucenter////////////////
-                if (defined('UC_STATUS') && UC_STATUS) {
-                    $uc = new \addons\ucenter\library\client\Client();
-                    $synchtml = $uc->uc_user_synregister($this->auth->id, $password);
-                }
-                $this->success(__('Sign up successful') . $synchtml, $url ? $url : url('user/index'));
+                $this->success(__('Sign up successful'), $url ? $url : url('user/index'));
             } else {
                 $this->error($this->auth->getError(), null, ['token' => $this->request->token()]);
             }
@@ -138,9 +143,10 @@ class User extends Frontend
         //判断来源
         $referer = $this->request->server('HTTP_REFERER');
         if (!$url && (strtolower(parse_url($referer, PHP_URL_HOST)) == strtolower($this->request->host()))
-            && !preg_match("/(user\/login|user\/register)/i", $referer)) {
+            && !preg_match("/(user\/login|user\/register|user\/logout)/i", $referer)) {
             $url = $referer;
         }
+        $this->view->assign('captchaType', config('fastadmin.user_register_captcha'));
         $this->view->assign('url', $url);
         $this->view->assign('title', __('Register'));
         return $this->view->fetch();
@@ -151,9 +157,10 @@ class User extends Frontend
      */
     public function login()
     {
-        $url = $this->request->request('url');
-        if ($this->auth->id)
-            $this->success(__('You\'ve logged in, do not login again'), $url);
+        $url = $this->request->request('url', '');
+        if ($this->auth->id) {
+            $this->success(__('You\'ve logged in, do not login again'), $url ? $url : url('user/index'));
+        }
         if ($this->request->isPost()) {
             $account = $this->request->post('account');
             $password = $this->request->post('password');
@@ -162,7 +169,7 @@ class User extends Frontend
             $rule = [
                 'account'   => 'require|length:3,50',
                 'password'  => 'require|length:6,30',
-                '__token__' => 'token',
+                '__token__' => 'require|token',
             ];
 
             $msg = [
@@ -180,16 +187,10 @@ class User extends Frontend
             $result = $validate->check($data);
             if (!$result) {
                 $this->error(__($validate->getError()), null, ['token' => $this->request->token()]);
-                return FALSE;
+                return false;
             }
             if ($this->auth->login($account, $password)) {
-                $synchtml = '';
-                ////////////////同步到Ucenter////////////////
-                if (defined('UC_STATUS') && UC_STATUS) {
-                    $uc = new \addons\ucenter\library\client\Client();
-                    $synchtml = $uc->uc_user_synlogin($this->auth->id);
-                }
-                $this->success(__('Logged in successful') . $synchtml, $url ? $url : url('user/index'));
+                $this->success(__('Logged in successful'), $url ? $url : url('user/index'));
             } else {
                 $this->error($this->auth->getError(), null, ['token' => $this->request->token()]);
             }
@@ -197,7 +198,7 @@ class User extends Frontend
         //判断来源
         $referer = $this->request->server('HTTP_REFERER');
         if (!$url && (strtolower(parse_url($referer, PHP_URL_HOST)) == strtolower($this->request->host()))
-            && !preg_match("/(user\/login|user\/register)/i", $referer)) {
+            && !preg_match("/(user\/login|user\/register|user\/logout)/i", $referer)) {
             $url = $referer;
         }
         $this->view->assign('url', $url);
@@ -208,17 +209,11 @@ class User extends Frontend
     /**
      * 注销登录
      */
-    function logout()
+    public function logout()
     {
         //注销本站
         $this->auth->logout();
-        $synchtml = '';
-        ////////////////同步到Ucenter////////////////
-        if (defined('UC_STATUS') && UC_STATUS) {
-            $uc = new \addons\ucenter\library\client\Client();
-            $synchtml = $uc->uc_user_synlogout();
-        }
-        $this->success(__('Logout successful') . $synchtml, url('user/index'));
+        $this->success(__('Logout successful'), url('user/index'));
     }
 
     /**
@@ -264,18 +259,12 @@ class User extends Frontend
             $result = $validate->check($data);
             if (!$result) {
                 $this->error(__($validate->getError()), null, ['token' => $this->request->token()]);
-                return FALSE;
+                return false;
             }
 
             $ret = $this->auth->changepwd($newpassword, $oldpassword);
             if ($ret) {
-                $synchtml = '';
-                ////////////////同步到Ucenter////////////////
-                if (defined('UC_STATUS') && UC_STATUS) {
-                    $uc = new \addons\ucenter\library\client\Client();
-                    $synchtml = $uc->uc_user_synlogout();
-                }
-                $this->success(__('Reset password successful') . $synchtml, url('user/login'));
+                $this->success(__('Reset password successful'), url('user/login'));
             } else {
                 $this->error($this->auth->getError(), null, ['token' => $this->request->token()]);
             }
@@ -283,5 +272,4 @@ class User extends Frontend
         $this->view->assign('title', __('Change password'));
         return $this->view->fetch();
     }
-
 }

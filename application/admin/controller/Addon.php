@@ -13,17 +13,19 @@ use think\Exception;
 /**
  * 插件管理
  *
- * @icon fa fa-circle-o
+ * @icon   fa fa-cube
  * @remark 可在线安装、卸载、禁用、启用插件，同时支持添加本地插件。FastAdmin已上线插件商店 ，你可以发布你的免费或付费插件：<a href="https://www.fastadmin.net/store.html" target="_blank">https://www.fastadmin.net/store.html</a>
  */
 class Addon extends Backend
 {
-
     protected $model = null;
 
     public function _initialize()
     {
         parent::_initialize();
+        if (!$this->auth->isSuperAdmin() && in_array($this->request->action(), ['install', 'uninstall', 'local', 'upgrade'])) {
+            $this->error(__('Access is allowed only to the super management group'));
+        }
     }
 
     /**
@@ -35,29 +37,34 @@ class Addon extends Backend
         foreach ($addons as $k => &$v) {
             $config = get_addon_config($v['name']);
             $v['config'] = $config ? 1 : 0;
+            $v['url'] = str_replace($this->request->server('SCRIPT_NAME'), '', $v['url']);
         }
-        $this->assignconfig(['addons' => $addons]);
+        $this->assignconfig(['addons' => $addons, 'api_url' => config('fastadmin.api_url'), 'faversion' => config('fastadmin.version')]);
         return $this->view->fetch();
     }
 
     /**
      * 配置
      */
-    public function config($ids = NULL)
+    public function config($name = null)
     {
-        $name = $this->request->get("name");
+        $name = $name ? $name : $this->request->get("name");
         if (!$name) {
-            $this->error(__('Parameter %s can not be empty', $ids ? 'id' : 'name'));
+            $this->error(__('Parameter %s can not be empty', 'name'));
+        }
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
         }
         if (!is_dir(ADDON_PATH . $name)) {
             $this->error(__('Directory not found'));
         }
         $info = get_addon_info($name);
         $config = get_addon_fullconfig($name);
-        if (!$info)
+        if (!$info) {
             $this->error(__('No Results were found'));
+        }
         if ($this->request->isPost()) {
-            $params = $this->request->post("row/a");
+            $params = $this->request->post("row/a", [], 'trim');
             if ($params) {
                 foreach ($config as $k => &$v) {
                     if (isset($params[$v['name']])) {
@@ -104,6 +111,9 @@ class Addon extends Backend
         if (!$name) {
             $this->error(__('Parameter %s can not be empty', 'name'));
         }
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
+        }
         try {
             $uid = $this->request->post("uid");
             $token = $this->request->post("token");
@@ -137,6 +147,9 @@ class Addon extends Backend
         if (!$name) {
             $this->error(__('Parameter %s can not be empty', 'name'));
         }
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
+        }
         try {
             Service::uninstall($name, $force);
             $this->success(__('Uninstall successful'));
@@ -157,6 +170,9 @@ class Addon extends Backend
         $force = (int)$this->request->post("force");
         if (!$name) {
             $this->error(__('Parameter %s can not be empty', 'name'));
+        }
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
         }
         try {
             $action = $action == 'enable' ? $action : 'disable';
@@ -190,6 +206,7 @@ class Addon extends Backend
             $tmpFile = $addonTmpDir . $info->getSaveName();
             try {
                 Service::unzip($tmpName);
+                unset($info);
                 @unlink($tmpFile);
                 $infoFile = $tmpAddonDir . 'info.ini';
                 if (!is_file($infoFile)) {
@@ -200,6 +217,9 @@ class Addon extends Backend
                 $name = isset($config['name']) ? $config['name'] : '';
                 if (!$name) {
                     throw new Exception(__('Addon info file data incorrect'));
+                }
+                if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+                    throw new Exception(__('Addon name incorrect'));
                 }
 
                 $newAddonDir = ADDON_PATH . $name . DS;
@@ -234,6 +254,7 @@ class Addon extends Backend
                     throw new Exception(__($e->getMessage()));
                 }
             } catch (Exception $e) {
+                unset($info);
                 @unlink($tmpFile);
                 @rmdirs($tmpAddonDir);
                 $this->error(__($e->getMessage()));
@@ -250,8 +271,15 @@ class Addon extends Backend
     public function upgrade()
     {
         $name = $this->request->post("name");
+        $addonTmpDir = RUNTIME_PATH . 'addons' . DS;
         if (!$name) {
             $this->error(__('Parameter %s can not be empty', 'name'));
+        }
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
+        }
+        if (!is_dir($addonTmpDir)) {
+            @mkdir($addonTmpDir, 0755, true);
         }
         try {
             $uid = $this->request->post("uid");
@@ -288,9 +316,12 @@ class Addon extends Backend
         $onlineaddons = Cache::get("onlineaddons");
         if (!is_array($onlineaddons)) {
             $onlineaddons = [];
-            $result = Http::sendRequest(config('fastadmin.api_url') . '/addon/index');
+            $result = Http::sendRequest(config('fastadmin.api_url') . '/addon/index', [], 'GET', [
+                CURLOPT_HTTPHEADER => ['Accept-Encoding:gzip'],
+                CURLOPT_ENCODING   => "gzip"
+            ]);
             if ($result['ret']) {
-                $json = json_decode($result['msg'], TRUE);
+                $json = (array)json_decode($result['msg'], true);
                 $rows = isset($json['rows']) ? $json['rows'] : [];
                 foreach ($rows as $index => $row) {
                     $onlineaddons[$row['name']] = $row;
@@ -302,8 +333,9 @@ class Addon extends Backend
         $addons = get_addon_list();
         $list = [];
         foreach ($addons as $k => $v) {
-            if ($search && stripos($v['name'], $search) === FALSE && stripos($v['intro'], $search) === FALSE)
+            if ($search && stripos($v['name'], $search) === false && stripos($v['intro'], $search) === false) {
                 continue;
+            }
 
             if (isset($onlineaddons[$v['name']])) {
                 $v = array_merge($v, $onlineaddons[$v['name']]);
@@ -314,11 +346,12 @@ class Addon extends Backend
                 $v['image'] = '';
                 $v['donateimage'] = '';
                 $v['demourl'] = '';
-                $v['price'] = '0.00';
+                $v['price'] = __('None');
                 $v['screenshots'] = [];
                 $v['releaselist'] = [];
             }
             $v['url'] = addon_url($v['name']);
+            $v['url'] = str_replace($this->request->server('SCRIPT_NAME'), '', $v['url']);
             $v['createtime'] = filemtime(ADDON_PATH . $v['name']);
             if ($filter && isset($filter['category_id']) && is_numeric($filter['category_id']) && $filter['category_id'] != $v['category_id']) {
                 continue;
@@ -334,5 +367,4 @@ class Addon extends Backend
         $callback = $this->request->get('callback') ? "jsonp" : "json";
         return $callback($result);
     }
-
 }

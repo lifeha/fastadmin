@@ -96,9 +96,6 @@ define(['jquery', 'bootstrap', 'backend', 'addtabs', 'table', 'echarts', 'echart
                             data: Orderdata.createdata
                         }]
                 });
-                if ($("#echart").width() != $("#echart canvas").width() && $("#echart canvas").width() < $("#echart").width()) {
-                    myChart.resize();
-                }
             }, 2000);
             $(window).resize(function () {
                 myChart.resize();
@@ -108,23 +105,12 @@ define(['jquery', 'bootstrap', 'backend', 'addtabs', 'table', 'echarts', 'echart
                 top.window.$("[data-toggle=checkupdate]").trigger("click");
             });
 
-            //读取FastAdmin的更新信息和社区动态
-            $.ajax({
-                url: Config.fastadmin.api_url + '/news/index',
-                type: 'post',
-                dataType: 'jsonp',
-                success: function (ret) {
-                    $("#news-list").html(Template("newstpl", {news: ret.newslist}));
-                }
+            $(document).on("click", ".btn-refresh", function () {
+                setTimeout(function () {
+                    myChart.resize();
+                }, 0);
             });
-            $.ajax({
-                url: Config.fastadmin.api_url + '/forum/discussion',
-                type: 'post',
-                dataType: 'jsonp',
-                success: function (ret) {
-                    $("#discussion-list").html(Template("discussiontpl", {news: ret.discussionlist}));
-                }
-            });
+
         }
     };
 

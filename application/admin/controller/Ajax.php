@@ -9,6 +9,7 @@ use think\Cache;
 use think\Config;
 use think\Db;
 use think\Lang;
+use think\Validate;
 
 /**
  * Ajax异步请求接口
@@ -35,6 +36,12 @@ class Ajax extends Backend
     public function lang()
     {
         header('Content-Type: application/javascript');
+        header("Cache-Control: public");
+        header("Pragma: cache");
+
+        $offset = 30 * 60 * 60 * 24; // 缓存一个月
+        header("Expires: " . gmdate("D, d M Y H:i:s", time() + $offset) . " GMT");
+
         $controllername = input("controllername");
         //默认只加载了控制器对应的语言名，你还根据控制器名来加载额外的语言包
         $this->loadlang($controllername);
@@ -54,6 +61,7 @@ class Ajax extends Backend
 
         //判断是否已经存在附件
         $sha1 = $file->hash();
+        $extparam = $this->request->post();
 
         $upload = Config::get('upload');
 
@@ -63,11 +71,15 @@ class Ajax extends Backend
         $size = (int)$upload['maxsize'] * pow(1024, isset($typeDict[$type]) ? $typeDict[$type] : 0);
         $fileInfo = $file->getInfo();
         $suffix = strtolower(pathinfo($fileInfo['name'], PATHINFO_EXTENSION));
-        $suffix = $suffix ? $suffix : 'file';
+        $suffix = $suffix && preg_match("/^[a-zA-Z0-9]+$/", $suffix) ? $suffix : 'file';
 
         $mimetypeArr = explode(',', strtolower($upload['mimetype']));
         $typeArr = explode('/', $fileInfo['type']);
 
+        //禁止上传PHP和HTML文件
+        if (in_array($fileInfo['type'], ['text/x-php', 'text/html']) || in_array($suffix, ['php', 'html', 'htm'])) {
+            $this->error(__('Uploaded file format is limited'));
+        }
         //验证文件后缀
         if ($upload['mimetype'] !== '*' &&
             (
@@ -76,6 +88,16 @@ class Ajax extends Backend
             )
         ) {
             $this->error(__('Uploaded file format is limited'));
+        }
+        //验证是否为图片文件
+        $imagewidth = $imageheight = 0;
+        if (in_array($fileInfo['type'], ['image/gif', 'image/jpg', 'image/jpeg', 'image/bmp', 'image/png', 'image/webp']) || in_array($suffix, ['gif', 'jpg', 'jpeg', 'bmp', 'png', 'webp'])) {
+            $imgInfo = getimagesize($fileInfo['tmp_name']);
+            if (!$imgInfo || !isset($imgInfo[0]) || !isset($imgInfo[1])) {
+                $this->error(__('Uploaded file is not a valid image'));
+            }
+            $imagewidth = isset($imgInfo[0]) ? $imgInfo[0] : $imagewidth;
+            $imageheight = isset($imgInfo[1]) ? $imgInfo[1] : $imageheight;
         }
         $replaceArr = [
             '{year}'     => date("Y"),
@@ -99,12 +121,6 @@ class Ajax extends Backend
         //
         $splInfo = $file->validate(['size' => $size])->move(ROOT_PATH . '/public' . $uploadDir, $fileName);
         if ($splInfo) {
-            $imagewidth = $imageheight = 0;
-            if (in_array($suffix, ['gif', 'jpg', 'jpeg', 'bmp', 'png', 'swf'])) {
-                $imgInfo = getimagesize($splInfo->getPathname());
-                $imagewidth = isset($imgInfo[0]) ? $imgInfo[0] : $imagewidth;
-                $imageheight = isset($imgInfo[1]) ? $imgInfo[1] : $imageheight;
-            }
             $params = array(
                 'admin_id'    => (int)$this->auth->id,
                 'user_id'     => 0,
@@ -118,6 +134,7 @@ class Ajax extends Backend
                 'uploadtime'  => time(),
                 'storage'     => 'local',
                 'sha1'        => $sha1,
+                'extparam'    => json_encode($extparam),
             );
             $attachment = model("attachment");
             $attachment->data(array_filter($params));
@@ -145,12 +162,17 @@ class Ajax extends Backend
         $field = $this->request->post("field");
         //操作的数据表
         $table = $this->request->post("table");
+        if (!Validate::is($table, "alphaDash")) {
+            $this->error();
+        }
+        //主键
+        $pk = $this->request->post("pk");
         //排序的方式
-        $orderway = $this->request->post("orderway", "", 'strtolower');
+        $orderway = strtolower($this->request->post("orderway", ""));
         $orderway = $orderway == 'asc' ? 'ASC' : 'DESC';
         $sour = $weighdata = [];
         $ids = explode(',', $ids);
-        $prikey = 'id';
+        $prikey = $pk ? $pk : (Db::name($table)->getPk() ?: 'id');
         $pid = $this->request->post("pid");
         //限制更新的字段
         $field = in_array($field, ['weigh']) ? $field : 'weigh';
@@ -158,9 +180,9 @@ class Ajax extends Backend
         // 如果设定了pid的值,此时只匹配满足条件的ID,其它忽略
         if ($pid !== '') {
             $hasids = [];
-            $list = Db::name($table)->where($prikey, 'in', $ids)->where('pid', 'in', $pid)->field('id,pid')->select();
+            $list = Db::name($table)->where($prikey, 'in', $ids)->where('pid', 'in', $pid)->field("{$prikey},pid")->select();
             foreach ($list as $k => $v) {
-                $hasids[] = $v['id'];
+                $hasids[] = $v[$prikey];
             }
             $ids = array_values(array_intersect($ids, $hasids));
         }
@@ -202,16 +224,19 @@ class Ajax extends Backend
             case 'content':
                 rmdirs(CACHE_PATH, false);
                 Cache::clear();
-                if ($type == 'content')
+                if ($type == 'content') {
                     break;
+                }
             case 'template':
                 rmdirs(TEMP_PATH, false);
-                if ($type == 'template')
+                if ($type == 'template') {
                     break;
+                }
             case 'addons':
                 Service::refresh();
-                if ($type == 'addons')
+                if ($type == 'addons') {
                     break;
+                }
         }
 
         \think\Hook::listen("wipecache_after");
@@ -245,8 +270,14 @@ class Ajax extends Backend
      */
     public function area()
     {
-        $province = $this->request->get('province');
-        $city = $this->request->get('city');
+        $params = $this->request->get("row/a");
+        if (!empty($params)) {
+            $province = isset($params['province']) ? $params['province'] : '';
+            $city = isset($params['city']) ? $params['city'] : null;
+        } else {
+            $province = $this->request->get('province');
+            $city = $this->request->get('city');
+        }
         $where = ['pid' => 0, 'level' => 1];
         $provincelist = null;
         if ($province !== '') {
@@ -263,6 +294,18 @@ class Ajax extends Backend
             }
         }
         $this->success('', null, $provincelist);
+    }
+
+    /**
+     * 生成后缀图标
+     */
+    public function icon()
+    {
+        $suffix = $this->request->request("suffix");
+        header('Content-type: image/svg+xml');
+        $suffix = $suffix ? $suffix : "FILE";
+        echo build_suffix_image($suffix);
+        exit;
     }
 
 }

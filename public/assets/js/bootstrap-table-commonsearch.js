@@ -40,7 +40,9 @@
         // 重置搜索
         form.on("click", "button[type=reset]", function (event) {
             form[0].reset();
-            that.onCommonSearch();
+            setTimeout(function () {
+                that.onCommonSearch();
+            }, 0);
         });
 
     };
@@ -108,8 +110,8 @@
                         var defaultValueArr = defaultValue.toString().match(/\|/) ? defaultValue.split('|') : ['', ''];
                         var placeholderArr = placeholder.toString().match(/\|/) ? placeholder.split('|') : [placeholder, placeholder];
                         htmlForm.push('<div class="row row-between">');
-                        htmlForm.push(sprintf('<div class="col-xs-6"><input type="%s" class="%s" name="%s" value="%s" placeholder="%s" id="%s" data-index="%s" %s %s></div>', type, addClass, vObjCol.field, defaultValueArr[0], placeholderArr[0], vObjCol.field, i, style, extend));
-                        htmlForm.push(sprintf('<div class="col-xs-6"><input type="%s" class="%s" name="%s" value="%s" placeholder="%s" id="%s" data-index="%s" %s %s></div>', type, addClass, vObjCol.field, defaultValueArr[1], placeholderArr[1], vObjCol.field, i, style, extend));
+                        htmlForm.push(sprintf('<div class="col-xs-6"><input type="%s" class="%s" name="%s" value="%s" placeholder="%s" id="%s-min" data-index="%s" %s %s></div>', type, addClass, vObjCol.field, defaultValueArr[0], placeholderArr[0], vObjCol.field, i, style, extend));
+                        htmlForm.push(sprintf('<div class="col-xs-6"><input type="%s" class="%s" name="%s" value="%s" placeholder="%s" id="%s-max" data-index="%s" %s %s></div>', type, addClass, vObjCol.field, defaultValueArr[1], placeholderArr[1], vObjCol.field, i, style, extend));
                         htmlForm.push('</div>');
                     } else {
                         htmlForm.push(sprintf('<input type="%s" class="%s" name="%s" value="%s" placeholder="%s" id="%s" data-index="%s" %s %s>', type, addClass, vObjCol.field, defaultValue, placeholder, vObjCol.field, i, style, extend));
@@ -350,7 +352,7 @@
         var searchQuery = getSearchQuery(this);
         this.trigger('common-search', this, searchQuery);
         this.options.pageNumber = 1;
-        this.options.pageSize = $.fn.bootstrapTable.defaults.pageSize;
+        //this.options.pageSize = $.fn.bootstrapTable.defaults.pageSize;
         this.refresh({});
     };
 

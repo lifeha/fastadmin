@@ -11,6 +11,7 @@
 @import url("../libs/nice-validator/dist/jquery.validator.css");
 @import url("../libs/bootstrap-select/dist/css/bootstrap-select.min.css");
 @import url("../libs/fastadmin-selectpage/selectpage.css");
+@import url("../libs/bootstrap-slider/slider.css");
 html,
 body {
   height: 100%;
@@ -917,7 +918,7 @@ table.table-nowrap thead > tr > th {
   }
 }
 /*平板样式*/
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   body .wrapper .main-header .logo {
     background: none;
     color: #fff;
@@ -996,4 +997,19 @@ table.table-nowrap thead > tr > th {
 .btn-switcher .text-gray {
   color: #d2d6de !important;
 }
-/*# sourceMappingURL=../css/backend.css.map */
+.jumpto input {
+  height: 31px;
+  width: 50px;
+  margin-left: 5px;
+  margin-right: 5px;
+  text-align: center;
+  display: inline-block;
+}
+.sidebar-menu li.treeview-open > a > .fa-angle-left,
+.sidebar-menu li.treeview-open > a > .pull-right-container > .fa-angle-left {
+  -webkit-transform: rotate(-90deg);
+  -ms-transform: rotate(-90deg);
+  -o-transform: rotate(-90deg);
+  transform: rotate(-90deg);
+}
+/*# sourceMappingURL=backend.css.map */

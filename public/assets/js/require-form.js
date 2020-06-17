@@ -1,7 +1,7 @@
 define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, Upload, Validator) {
     var Form = {
         config: {
-            fieldlisttpl: '<dd class="form-inline"><input type="text" name="<%=name%>[<%=index%>][key]" class="form-control" value="<%=row.key%>" size="10" /> <input type="text" name="<%=name%>[<%=index%>][value]" class="form-control" value="<%=row.value%>" size="30" /> <span class="btn btn-sm btn-danger btn-remove"><i class="fa fa-times"></i></span> <span class="btn btn-sm btn-primary btn-dragsort"><i class="fa fa-arrows"></i></span></dd>'
+            fieldlisttpl: '<dd class="form-inline"><input type="text" name="<%=name%>[<%=index%>][key]" class="form-control" value="<%=row.key%>" size="10" /> <input type="text" name="<%=name%>[<%=index%>][value]" class="form-control" value="<%=row.value%>" /> <span class="btn btn-sm btn-danger btn-remove"><i class="fa fa-times"></i></span> <span class="btn btn-sm btn-primary btn-dragsort"><i class="fa fa-arrows"></i></span></dd>'
         },
         events: {
             validator: function (form, success, error, submit) {
@@ -20,7 +20,7 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                     },
                     dataFilter: function (data) {
                         if (data.code === 1) {
-                            return "";
+                            return data.msg ? {"ok": data.msg} : '';
                         } else {
                             return data.msg;
                         }
@@ -83,12 +83,23 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
 
                 //移除提交按钮的disabled类
                 $(".layer-footer [type=submit],.fixed-footer [type=submit],.normal-footer [type=submit]", form).removeClass("disabled");
+                //自定义关闭按钮事件
+                form.on("click", ".layer-close", function () {
+                    var index = parent.Layer.getFrameIndex(window.name);
+                    parent.Layer.close(index);
+                    return false;
+                });
             },
             selectpicker: function (form) {
                 //绑定select元素事件
                 if ($(".selectpicker", form).size() > 0) {
                     require(['bootstrap-select', 'bootstrap-select-lang'], function () {
                         $('.selectpicker', form).selectpicker();
+                        $(form).on("reset", function () {
+                            setTimeout(function () {
+                                $('.selectpicker').selectpicker('refresh').trigger("change");
+                            }, 1);
+                        });
                     });
                 }
             },
@@ -133,6 +144,11 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                 //绑定城市远程插件
                 if ($("[data-toggle='city-picker']", form).size() > 0) {
                     require(['citypicker'], function () {
+                        $(form).on("reset", function () {
+                            setTimeout(function () {
+                                $("[data-toggle='city-picker']").citypicker('refresh');
+                            }, 1);
+                        });
                     });
                 }
             },
@@ -157,7 +173,9 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                             showClose: true
                         };
                         $('.datetimepicker', form).parent().css('position', 'relative');
-                        $('.datetimepicker', form).datetimepicker(options);
+                        $('.datetimepicker', form).datetimepicker(options).on('dp.change', function (e) {
+                            $(this, document).trigger("changed");
+                        });
                     });
                 }
             },
@@ -198,7 +216,7 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                             $(this).on('cancel.daterangepicker', function (ev, picker) {
                                 $(this).val('').trigger('blur');
                             });
-                            $(this).daterangepicker($.extend({}, options, $(this).data()), callback);
+                            $(this).daterangepicker($.extend(true, options, $(this).data()), callback);
                         });
                     });
                 }
@@ -242,9 +260,9 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                                             return false;
                                         }
                                     }
-                                    inputObj.val(result).trigger("change");
+                                    inputObj.val(result).trigger("change").trigger("validate");
                                 } else {
-                                    $("#" + input_id).val(data.url).trigger("change");
+                                    $("#" + input_id).val(data.url).trigger("change").trigger("validate");
                                 }
                             }
                         });
@@ -260,9 +278,9 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                         var refresh = function (name) {
                             var data = {};
                             var textarea = $("textarea[name='" + name + "']", form);
-                            var container = textarea.closest("dl");
+                            var container = $(".fieldlist[data-name='" + name + "']");
                             var template = container.data("template");
-                            $.each($("input,select", container).serializeArray(), function (i, j) {
+                            $.each($("input,select,textarea", container).serializeArray(), function (i, j) {
                                 var reg = /\[(\w+)\]\[(\w+)\]$/g;
                                 var match = reg.exec(j.name);
                                 if (!match)
@@ -288,42 +306,44 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                             textarea.val(JSON.stringify(result));
                         };
                         //监听文本框改变事件
-                        $(document).on('change keyup', ".fieldlist input,.fieldlist textarea,.fieldlist select", function () {
-                            refresh($(this).closest("dl").data("name"));
+                        $(document).on('change keyup changed', ".fieldlist input,.fieldlist textarea,.fieldlist select", function () {
+                            refresh($(this).closest(".fieldlist").data("name"));
                         });
                         //追加控制
                         $(".fieldlist", form).on("click", ".btn-append,.append", function (e, row) {
-                            var container = $(this).closest("dl");
+                            var container = $(this).closest(".fieldlist");
+                            var tagName = container.data("tag") || "dd";
                             var index = container.data("index");
                             var name = container.data("name");
                             var template = container.data("template");
                             var data = container.data();
                             index = index ? parseInt(index) : 0;
                             container.data("index", index + 1);
-                            var row = row ? row : {};
+                            row = row ? row : {};
                             var vars = {index: index, name: name, data: data, row: row};
                             var html = template ? Template(template, vars) : Template.render(Form.config.fieldlisttpl, vars);
-                            $(html).insertBefore($(this).closest("dd"));
-                            $(this).trigger("fa.event.appendfieldlist", $(this).closest("dd").prev());
+                            $(html).insertBefore($(tagName + ":last", container));
+                            $(this).trigger("fa.event.appendfieldlist", $(this).closest(tagName).prev());
                         });
                         //移除控制
-                        $(".fieldlist", form).on("click", "dd .btn-remove", function () {
-                            var container = $(this).closest("dl");
-                            $(this).closest("dd").remove();
+                        $(".fieldlist", form).on("click", ".btn-remove", function () {
+                            var container = $(this).closest(".fieldlist");
+                            var tagName = container.data("tag") || "dd";
+                            $(this).closest(tagName).remove();
                             refresh(container.data("name"));
                         });
-                        //拖拽排序
-                        $("dl.fieldlist", form).dragsort({
-                            itemSelector: 'dd',
-                            dragSelector: ".btn-dragsort",
-                            dragEnd: function () {
-                                refresh($(this).closest("dl").data("name"));
-                            },
-                            placeHolderTemplate: "<dd></dd>"
-                        });
-                        //渲染数据
+                        //渲染数据&拖拽排序
                         $(".fieldlist", form).each(function () {
                             var container = this;
+                            var tagName = $(this).data("tag") || "dd";
+                            $(this).dragsort({
+                                itemSelector: tagName,
+                                dragSelector: ".btn-dragsort",
+                                dragEnd: function () {
+                                    refresh($(this).closest(".fieldlist").data("name"));
+                                },
+                                placeHolderTemplate: $("<" + tagName + "/>")
+                            });
                             var textarea = $("textarea[name='" + $(this).data("name") + "']", form);
                             if (textarea.val() == '') {
                                 return true;
@@ -368,6 +388,20 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
             },
             bindevent: function (form) {
 
+            },
+            slider: function (form) {
+                if ($(".slider", form).size() > 0) {
+                    require(['bootstrap-slider'], function () {
+                        $('.slider').removeClass('hidden').css('width', function (index, value) {
+                            return $(this).parents('.form-control').width();
+                        }).slider().on('slide', function (ev) {
+                            var data = $(this).data();
+                            if (typeof data.unit !== 'undefined') {
+                                $(this).parents('.form-control').siblings('.value').text(ev.value + data.unit);
+                            }
+                        });
+                    });
+                }
             }
         },
         api: {
@@ -407,7 +441,7 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                     complete: function (xhr) {
                         var token = xhr.getResponseHeader('__token__');
                         if (token) {
-                            $("input[name='__token__']", form).val(token);
+                            $("input[name='__token__']").val(token);
                         }
                     }
                 }, function (data, ret) {
@@ -415,7 +449,7 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                     if (data && typeof data === 'object') {
                         //刷新客户端token
                         if (typeof data.token !== 'undefined') {
-                            $("input[name='__token__']", form).val(data.token);
+                            $("input[name='__token__']").val(data.token);
                         }
                         //调用客户端事件
                         if (typeof data.callback !== 'undefined' && typeof data.callback === 'function') {
@@ -429,7 +463,7 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                     }
                 }, function (data, ret) {
                     if (data && typeof data === 'object' && typeof data.token !== 'undefined') {
-                        $("input[name='__token__']", form).val(data.token);
+                        $("input[name='__token__']").val(data.token);
                     }
                     if (typeof error === 'function') {
                         if (false === error.call(form, data, ret)) {
@@ -466,6 +500,8 @@ define(['jquery', 'bootstrap', 'upload', 'validator'], function ($, undefined, U
                 events.faselect(form);
 
                 events.fieldlist(form);
+
+                events.slider(form);
 
                 events.switcher(form);
             },

@@ -73,6 +73,9 @@ body {
 #header-navbar li.dropdown ul.dropdown-menu {
   min-width: 94px;
 }
+form.form-horizontal .control-label {
+  font-weight: normal;
+}
 .panel-default {
   padding: 0 15px;
   border-color: #e4ecf3;
@@ -507,4 +510,12 @@ main.content {
   padding: .5em .93em;
   font-size: 14px;
 }
-/*# sourceMappingURL=../css/frontend.css.map */
+.jumpto input {
+  height: 31px;
+  width: 50px;
+  margin-left: 5px;
+  margin-right: 5px;
+  text-align: center;
+  display: inline-block;
+}
+/*# sourceMappingURL=frontend.css.map */

@@ -22,6 +22,8 @@ class Index extends Backend
     public function _initialize()
     {
         parent::_initialize();
+        //移除HTML标签
+        $this->request->filter('trim,strip_tags,htmlspecialchars');
     }
 
     /**
@@ -67,7 +69,7 @@ class Index extends Backend
             $rule = [
                 'username'  => 'require|length:3,30',
                 'password'  => 'require|length:3,30',
-                '__token__' => 'token',
+                '__token__' => 'require|token',
             ];
             $data = [
                 'username'  => $username,
