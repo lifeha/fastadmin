@@ -68,7 +68,7 @@ class Auth extends \fast\Auth
     }
 
     /**
-     * 注销登录
+     * 退出登录
      */
     public function logout()
     {
@@ -183,7 +183,9 @@ class Auth extends \fast\Auth
         if (Config::get('fastadmin.login_unique')) {
             $my = Admin::get($admin['id']);
             if (!$my || $my['token'] != $admin['token']) {
-                $this->logout();
+                $this->logined = false; //重置登录状态
+                Session::delete("admin");
+                Cookie::delete("keeplogin");
                 return false;
             }
         }
@@ -481,7 +483,7 @@ class Auth extends \fast\Auth
                 $addtabs = $childList || !$url ? "" : (stripos($url, "?") !== false ? "&" : "?") . "ref=addtabs";
                 $childList = str_replace(
                     '" pid="' . $item['id'] . '"',
-                    ' treeview ' . ($current ? '' : 'hidden') . '" pid="' . $item['id'] . '"',
+                    ' ' . ($current ? '' : 'hidden') . '" pid="' . $item['id'] . '"',
                     $childList
                 );
                 $nav .= '<li class="' . ($current ? 'active' : '') . '"><a href="' . $url . $addtabs . '" addtabs="' . $item['id'] . '" url="' . $url . '"><i class="' . $item['icon'] . '"></i> <span>' . $item['title'] . '</span> <span class="pull-right-container"> </span></a> </li>';

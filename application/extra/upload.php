@@ -26,4 +26,12 @@ return [
      * 是否支持批量上传
      */
     'multiple'  => false,
+    /**
+     * 是否支持分片上传
+     */
+    'chunking'  => false,
+    /**
+     * 默认分片大小
+     */
+    'chunksize' => 2097152,
 ];

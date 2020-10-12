@@ -211,7 +211,7 @@ class Crud extends Command
         //关联表
         $relation = $input->getOption('relation');
         //自定义关联表模型
-        $relationModel = $input->getOption('relationmodel');
+        $relationModels = $input->getOption('relationmodel');
         //模式
         $relationMode = $mode = $input->getOption('relationmode');
         //外键
@@ -337,7 +337,7 @@ class Crud extends Command
                     }
                 }
                 $relationTableInfo = $relationTableInfo[0];
-                $relationModel = isset($relationModel[$index]) ? $relationModel[$index] : '';
+                $relationModel = isset($relationModels[$index]) ? $relationModels[$index] : '';
 
                 list($relationNamespace, $relationName, $relationFile) = $this->getModelData($modelModuleName, $relationModel, $relationName);
 
@@ -1394,12 +1394,12 @@ EOD;
         }
         $multiple = substr($field, -1) == 's' ? ' data-multiple="true"' : ' data-multiple="false"';
         $preview = ' data-preview-id="p-' . $field . '"';
-        $previewcontainer = $preview ? '<ul class="row list-inline plupload-preview" id="p-' . $field . '"></ul>' : '';
+        $previewcontainer = $preview ? '<ul class="row list-inline faupload-preview" id="p-' . $field . '"></ul>' : '';
         return <<<EOD
 <div class="input-group">
                 {$content}
                 <div class="input-group-addon no-border no-padding">
-                    <span><button type="button" id="plupload-{$field}" class="btn btn-danger plupload" data-input-id="c-{$field}"{$uploadfilter}{$multiple}{$preview}><i class="fa fa-upload"></i> {:__('Upload')}</button></span>
+                    <span><button type="button" id="faupload-{$field}" class="btn btn-danger faupload" data-input-id="c-{$field}"{$uploadfilter}{$multiple}{$preview}><i class="fa fa-upload"></i> {:__('Upload')}</button></span>
                     <span><button type="button" id="fachoose-{$field}" class="btn btn-primary fachoose" data-input-id="c-{$field}"{$selectfilter}{$multiple}><i class="fa fa-list"></i> {:__('Choose')}</button></span>
                 </div>
                 <span class="msg-box n-right" for="c-{$field}"></span>
@@ -1449,8 +1449,17 @@ EOD;
         if ($itemArr) {
             $html .= ", searchList: " . $searchList;
         }
+
+        // 文件、图片、权重等字段默认不加入搜索栏，字符串类型默认LIKE
+        $noSearchFiles = ['file$', 'files$', 'image$', 'images$', '^weigh$'];
+        if(preg_match("/" . implode('|', $noSearchFiles) . "/i", $field)){
+            $html .= ", operate: false";
+        }else if(in_array($datatype, ['varchar'])) {
+            $html .= ", operate: 'LIKE'";
+        }
+
         if (in_array($datatype, ['date', 'datetime']) || $formatter === 'datetime') {
-            $html .= ", operate:'RANGE', addclass:'datetimerange'";
+            $html .= ", operate:'RANGE', addclass:'datetimerange', autocomplete:false";
         } elseif (in_array($datatype, ['float', 'double', 'decimal'])) {
             $html .= ", operate:'BETWEEN'";
         }

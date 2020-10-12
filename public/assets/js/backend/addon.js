@@ -31,6 +31,8 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                         btn: [__('Switch to the local'), __('Try to reload')]
                     }, function (index) {
                         layer.close(index);
+                        $(".panel .nav-tabs").hide();
+                        $(".toolbar > *:not(:first)").hide();
                         $(".btn-switch[data-type='local']").trigger("click");
                     }, function (index) {
                         layer.close(index);
@@ -61,6 +63,15 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
 
             Template.helper("Moment", Moment);
             Template.helper("addons", Config['addons']);
+
+            $("#faupload-addon").data("params", function () {
+                var userinfo = Controller.api.userinfo.get();
+                return {
+                    uid: userinfo ? userinfo.id : '',
+                    token: userinfo ? userinfo.token : '',
+                    version: Config.faversion
+                };
+            });
 
             // 初始化表格
             table.bootstrapTable({
@@ -164,10 +175,11 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
 
             // 离线安装
             require(['upload'], function (Upload) {
-                Upload.api.plupload("#plupload-addon", function (data, ret) {
+                Upload.api.upload("#faupload-addon", function (data, ret) {
                     Config['addons'][data.addon.name] = data.addon;
                     Toastr.success(ret.msg);
                     operate(data.addon.name, 'enable', false);
+                    return false;
                 });
             });
 
@@ -196,10 +208,31 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                 table.bootstrapTable('refresh', {url: $(this).data("url"), pageNumber: 1});
                 return false;
             });
+            var tables = [];
+            $(document).on("click", "#droptables", function () {
+                if ($(this).prop("checked")) {
+                    Fast.api.ajax({
+                        url: "addon/get_table_list",
+                        async: false,
+                        data: {name: $(this).data("name")}
+                    }, function (data) {
+                        tables = data.tables;
+                        return false;
+                    });
+                    var html;
+                    html = tables.length > 0 ? '<div class="alert alert-warning-light droptablestips" style="max-width:480px;max-height:300px;overflow-y: auto;">' + __('The following data tables will be deleted') + '：<br>' + tables.join("<br>") + '</div>'
+                        : '<div class="alert alert-warning-light droptablestips">' + __('The Addon did not create a data table') + '</div>';
+                    $(html).insertAfter($(this).closest("p"));
+                } else {
+                    $(".droptablestips").remove();
+                }
+                $(window).resize();
+            });
 
             // 会员信息
             $(document).on("click", ".btn-userinfo", function () {
                 var that = this;
+                var area = [$(window).width() > 800 ? '500px' : '95%', $(window).height() > 600 ? '400px' : '95%'];
                 var userinfo = Controller.api.userinfo.get();
                 if (!userinfo) {
                     Layer.open({
@@ -295,8 +328,7 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                         title: __('Warning'),
                         icon: 1
                     });
-                    $('.btn-refresh').trigger('click');
-                    Fast.api.refreshmenu();
+                    Controller.api.refresh(table, name);
                 }, function (data, ret) {
                     //如果是需要购买的插件则弹出二维码提示
                     if (ret && ret.code === -1) {
@@ -350,15 +382,14 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                 });
             };
 
-            var uninstall = function (name, force) {
+            var uninstall = function (name, force, droptables) {
                 Fast.api.ajax({
                     url: 'addon/uninstall',
-                    data: {name: name, force: force ? 1 : 0}
+                    data: {name: name, force: force ? 1 : 0, droptables: droptables ? 1 : 0}
                 }, function (data, ret) {
                     delete Config['addons'][name];
                     Layer.closeAll();
-                    $('.btn-refresh').trigger('click');
-                    Fast.api.refreshmenu();
+                    Controller.api.refresh(table, name);
                 }, function (data, ret) {
                     if (ret && ret.code === -3) {
                         //插件目录发现影响全局的文件
@@ -372,7 +403,7 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
 
                             },
                             yes: function () {
-                                uninstall(name, true);
+                                uninstall(name, true, droptables);
                             }
                         });
 
@@ -391,8 +422,7 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                     var addon = Config['addons'][name];
                     addon.state = action === 'enable' ? 1 : 0;
                     Layer.closeAll();
-                    $('.btn-refresh').trigger('click');
-                    Fast.api.refreshmenu();
+                    Controller.api.refresh(table, name);
                 }, function (data, ret) {
                     if (ret && ret.code === -3) {
                         //插件目录发现影响全局的文件
@@ -425,10 +455,9 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                     url: 'addon/upgrade',
                     data: {name: name, uid: uid, token: token, version: version, faversion: Config.faversion}
                 }, function (data, ret) {
-                    Config['addons'][name].version = version;
+                    Config['addons'][name] = data.addon;
                     Layer.closeAll();
-                    $('.btn-refresh').trigger('click');
-                    Fast.api.refreshmenu();
+                    Controller.api.refresh(table, name);
                 }, function (data, ret) {
                     Layer.alert(ret.msg);
                     return false;
@@ -463,11 +492,12 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
             $(document).on("click", ".btn-uninstall", function () {
                 var name = $(this).closest(".operate").data('name');
                 if (Config['addons'][name].state == 1) {
-                    Layer.alert(__('Please disable addon first'), {icon: 7});
+                    Layer.alert(__('Please disable the add before trying to uninstall'), {icon: 7});
                     return false;
                 }
-                Layer.confirm(__('Uninstall tips', Config['addons'][name].title), function () {
-                    uninstall(name, false);
+                Template.helper("__", __);
+                Layer.confirm(Template("uninstalltpl", {addon: Config['addons'][name]}), {focusBtn: false}, function (index, layero) {
+                    uninstall(name, false, $("input[name='droptables']", layero).prop("checked"));
                 });
             });
 
@@ -488,7 +518,7 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
             $(document).on("click", ".btn-upgrade", function () {
                 var name = $(this).closest(".operate").data('name');
                 if (Config['addons'][name].state == 1) {
-                    Layer.alert(__('Please disable addon first'), {icon: 7});
+                    Layer.alert(__('Please disable the add before trying to upgrade'), {icon: 7});
                     return false;
                 }
                 var version = $(this).data("version");
@@ -545,10 +575,10 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                     var url = 'javascript:';
                     if (typeof row.homepage !== 'undefined') {
                         url = row.homepage;
-                    } else if (typeof row.qq !== 'undefined') {
+                    } else if (typeof row.qq !== 'undefined' && row.qq) {
                         url = 'https://wpa.qq.com/msgrd?v=3&uin=' + row.qq + '&site=fastadmin.net&menu=yes';
                     }
-                    return '<a href="' + url + '" target="_blank" data-toggle="tooltip" title="' + __('Click to contact developer') + '" class="text-primary">' + value + '</a>';
+                    return '<a href="' + url + '" target="_blank" data-toggle="tooltip" class="text-primary">' + value + '</a>';
                 },
                 price: function (value, row, index) {
                     if (isNaN(value)) {
@@ -580,6 +610,20 @@ define(['jquery', 'bootstrap', 'backend', 'table', 'form', 'template'], function
                     } else {
                         localStorage.removeItem("fastadmin_userinfo");
                     }
+                }
+            },
+            refresh: function (table, name) {
+                //刷新左侧边栏
+                Fast.api.refreshmenu();
+
+                //刷新行数据
+                if ($(".operate[data-name='" + name + "']").length > 0) {
+                    var index = $(".operate[data-name='" + name + "']").closest("tr[data-index]").data("index");
+                    var row = Table.api.getrowbyindex(table, index);
+                    row.addon = typeof Config['addons'][name] !== 'undefined' ? Config['addons'][name] : undefined;
+                    table.bootstrapTable("updateRow", {index: index, row: row});
+                } else if ($(".btn-switch.active").data("type") == "local") {
+                    $(".btn-refresh").trigger("click");
                 }
             }
         }

@@ -2,6 +2,8 @@
 
 // 公共助手函数
 
+use Symfony\Component\VarExporter\VarExporter;
+
 if (!function_exists('__')) {
 
     /**
@@ -97,7 +99,7 @@ if (!function_exists('is_really_writable')) {
 
     /**
      * 判断文件或文件夹是否可写
-     * @param    string $file 文件或目录
+     * @param string $file 文件或目录
      * @return    bool
      */
     function is_really_writable($file)
@@ -264,29 +266,12 @@ if (!function_exists('var_export_short')) {
 
     /**
      * 返回打印数组结构
-     * @param string $var    数组
-     * @param string $indent 缩进字符
+     * @param string $var 数组
      * @return string
      */
-    function var_export_short($var, $indent = "")
+    function var_export_short($var)
     {
-        switch (gettype($var)) {
-            case "string":
-                return '"' . addcslashes($var, "\\\$\"\r\n\t\v\f") . '"';
-            case "array":
-                $indexed = array_keys($var) === range(0, count($var) - 1);
-                $r = [];
-                foreach ($var as $key => $value) {
-                    $r[] = "$indent    "
-                        . ($indexed ? "" : var_export_short($key) . " => ")
-                        . var_export_short($value, "$indent    ");
-                }
-                return "[\n" . implode(",\n", $r) . "\n" . $indent . "]";
-            case "boolean":
-                return $var ? "TRUE" : "FALSE";
-            default:
-                return var_export($var, true);
-        }
+        return VarExporter::export($var);
     }
 }
 
@@ -360,5 +345,61 @@ if (!function_exists('hsv2rgb')) {
             floor($g * 255),
             floor($b * 255)
         ];
+    }
+}
+
+if (!function_exists('check_nav_active')) {
+    /**
+     * 检测会员中心导航是否高亮
+     */
+    function check_nav_active($url, $classname = 'active')
+    {
+        $auth = \app\common\library\Auth::instance();
+        $requestUrl = $auth->getRequestUri();
+        $url = ltrim($url, '/');
+        return $requestUrl === str_replace(".", "/", $url) ? $classname : '';
+    }
+}
+
+if (!function_exists('check_cors_request')) {
+    /**
+     * 跨域检测
+     */
+    function check_cors_request()
+    {
+        if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN']) {
+            $info = parse_url($_SERVER['HTTP_ORIGIN']);
+            $domainArr = explode(',', config('fastadmin.cors_request_domain'));
+            $domainArr[] = request()->host(true);
+            if (in_array("*", $domainArr) || in_array($_SERVER['HTTP_ORIGIN'], $domainArr) || (isset($info['host']) && in_array($info['host'], $domainArr))) {
+                header("Access-Control-Allow-Origin: " . $_SERVER['HTTP_ORIGIN']);
+            } else {
+                header('HTTP/1.1 403 Forbidden');
+                exit;
+            }
+
+            header('Access-Control-Allow-Credentials: true');
+            header('Access-Control-Max-Age: 86400');
+
+            if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+                if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD'])) {
+                    header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+                }
+                if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'])) {
+                    header("Access-Control-Allow-Headers: {$_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']}");
+                }
+                exit;
+            }
+        }
+    }
+}
+
+if (!function_exists('xss_clean')) {
+    /**
+     * 清理XSS
+     */
+    function xss_clean($content, $is_image = false)
+    {
+        return \app\common\library\Security::instance()->xss_clean($content, $is_image);
     }
 }

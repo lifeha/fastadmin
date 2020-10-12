@@ -8,6 +8,7 @@ use think\addons\AddonException;
 use think\addons\Service;
 use think\Cache;
 use think\Config;
+use think\Db;
 use think\Exception;
 
 /**
@@ -19,6 +20,7 @@ use think\Exception;
 class Addon extends Backend
 {
     protected $model = null;
+    protected $noNeedRight = ['get_table_list'];
 
     public function _initialize()
     {
@@ -114,6 +116,8 @@ class Addon extends Backend
         if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
             $this->error(__('Addon name incorrect'));
         }
+
+        $info = [];
         try {
             $uid = $this->request->post("uid");
             $token = $this->request->post("token");
@@ -125,16 +129,13 @@ class Addon extends Backend
                 'version'   => $version,
                 'faversion' => $faversion
             ];
-            Service::install($name, $force, $extend);
-            $info = get_addon_info($name);
-            $info['config'] = get_addon_config($name) ? 1 : 0;
-            $info['state'] = 1;
-            $this->success(__('Install successful'), null, ['addon' => $info]);
+            $info = Service::install($name, $force, $extend);
         } catch (AddonException $e) {
             $this->result($e->getData(), $e->getCode(), __($e->getMessage()));
         } catch (Exception $e) {
             $this->error(__($e->getMessage()), $e->getCode());
         }
+        $this->success(__('Install successful'), '', ['addon' => $info]);
     }
 
     /**
@@ -144,20 +145,37 @@ class Addon extends Backend
     {
         $name = $this->request->post("name");
         $force = (int)$this->request->post("force");
+        $droptables = (int)$this->request->post("droptables");
         if (!$name) {
             $this->error(__('Parameter %s can not be empty', 'name'));
         }
         if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
             $this->error(__('Addon name incorrect'));
         }
+        //只有开启调试且为超级管理员才允许删除相关数据库
+        $tables = [];
+        if ($droptables && Config::get("app_debug") && $this->auth->isSuperAdmin()) {
+            $tables = get_addon_tables($name);
+        }
         try {
             Service::uninstall($name, $force);
-            $this->success(__('Uninstall successful'));
+            if ($tables) {
+                $prefix = Config::get('database.prefix');
+                //删除插件关联表
+                foreach ($tables as $index => $table) {
+                    //忽略非插件标识的表名
+                    if (!preg_match("/^{$prefix}{$name}/", $table)) {
+                        continue;
+                    }
+                    Db::execute("DROP TABLE IF EXISTS `{$table}`");
+                }
+            }
         } catch (AddonException $e) {
             $this->result($e->getData(), $e->getCode(), __($e->getMessage()));
         } catch (Exception $e) {
             $this->error(__($e->getMessage()));
         }
+        $this->success(__('Uninstall successful'));
     }
 
     /**
@@ -179,12 +197,12 @@ class Addon extends Backend
             //调用启用、禁用的方法
             Service::$action($name, $force);
             Cache::rm('__menu__');
-            $this->success(__('Operate successful'));
         } catch (AddonException $e) {
             $this->result($e->getData(), $e->getCode(), __($e->getMessage()));
         } catch (Exception $e) {
             $this->error(__($e->getMessage()));
         }
+        $this->success(__('Operate successful'));
     }
 
     /**
@@ -194,75 +212,27 @@ class Addon extends Backend
     {
         Config::set('default_return_type', 'json');
 
+        $info = [];
         $file = $this->request->file('file');
-        $addonTmpDir = RUNTIME_PATH . 'addons' . DS;
-        if (!is_dir($addonTmpDir)) {
-            @mkdir($addonTmpDir, 0755, true);
-        }
-        $info = $file->rule('uniqid')->validate(['size' => 10240000, 'ext' => 'zip'])->move($addonTmpDir);
-        if ($info) {
-            $tmpName = substr($info->getFilename(), 0, stripos($info->getFilename(), '.'));
-            $tmpAddonDir = ADDON_PATH . $tmpName . DS;
-            $tmpFile = $addonTmpDir . $info->getSaveName();
-            try {
-                Service::unzip($tmpName);
-                unset($info);
-                @unlink($tmpFile);
-                $infoFile = $tmpAddonDir . 'info.ini';
-                if (!is_file($infoFile)) {
-                    throw new Exception(__('Addon info file was not found'));
-                }
-
-                $config = Config::parse($infoFile, '', $tmpName);
-                $name = isset($config['name']) ? $config['name'] : '';
-                if (!$name) {
-                    throw new Exception(__('Addon info file data incorrect'));
-                }
-                if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
-                    throw new Exception(__('Addon name incorrect'));
-                }
-
-                $newAddonDir = ADDON_PATH . $name . DS;
-                if (is_dir($newAddonDir)) {
-                    throw new Exception(__('Addon already exists'));
-                }
-
-                //重命名插件文件夹
-                rename($tmpAddonDir, $newAddonDir);
-                try {
-                    //默认禁用该插件
-                    $info = get_addon_info($name);
-                    if ($info['state']) {
-                        $info['state'] = 0;
-                        set_addon_info($name, $info);
-                    }
-
-                    //执行插件的安装方法
-                    $class = get_addon_class($name);
-                    if (class_exists($class)) {
-                        $addon = new $class();
-                        $addon->install();
-                    }
-
-                    //导入SQL
-                    Service::importsql($name);
-
-                    $info['config'] = get_addon_config($name) ? 1 : 0;
-                    $this->success(__('Offline installed tips'), null, ['addon' => $info]);
-                } catch (Exception $e) {
-                    @rmdirs($newAddonDir);
-                    throw new Exception(__($e->getMessage()));
-                }
-            } catch (Exception $e) {
-                unset($info);
-                @unlink($tmpFile);
-                @rmdirs($tmpAddonDir);
-                $this->error(__($e->getMessage()));
+        try {
+            $uid = $this->request->post("uid");
+            $token = $this->request->post("token");
+            $faversion = $this->request->post("faversion");
+            if (!$uid || !$token) {
+                throw new Exception(__('Please login and try to install'));
             }
-        } else {
-            // 上传失败获取错误信息
-            $this->error(__($file->getError()));
+            $extend = [
+                'uid'       => $uid,
+                'token'     => $token,
+                'faversion' => $faversion
+            ];
+            $info = Service::local($file, $extend);
+        } catch (AddonException $e) {
+            $this->result($e->getData(), $e->getCode(), __($e->getMessage()));
+        } catch (Exception $e) {
+            $this->error(__($e->getMessage()));
         }
+        $this->success(__('Offline installed tips'), '', ['addon' => $info]);
     }
 
     /**
@@ -281,6 +251,8 @@ class Addon extends Backend
         if (!is_dir($addonTmpDir)) {
             @mkdir($addonTmpDir, 0755, true);
         }
+
+        $info = [];
         try {
             $uid = $this->request->post("uid");
             $token = $this->request->post("token");
@@ -293,14 +265,14 @@ class Addon extends Backend
                 'faversion' => $faversion
             ];
             //调用更新的方法
-            Service::upgrade($name, $extend);
+            $info = Service::upgrade($name, $extend);
             Cache::rm('__menu__');
-            $this->success(__('Operate successful'));
         } catch (AddonException $e) {
             $this->result($e->getData(), $e->getCode(), __($e->getMessage()));
         } catch (Exception $e) {
             $this->error(__($e->getMessage()));
         }
+        $this->success(__('Operate successful'), '', ['addon' => $info]);
     }
 
     /**
@@ -314,7 +286,7 @@ class Addon extends Backend
         $search = $this->request->get("search");
         $search = htmlspecialchars(strip_tags($search));
         $onlineaddons = Cache::get("onlineaddons");
-        if (!is_array($onlineaddons)) {
+        if (!is_array($onlineaddons) && config('fastadmin.api_url')) {
             $onlineaddons = [];
             $result = Http::sendRequest(config('fastadmin.api_url') . '/addon/index', [], 'GET', [
                 CURLOPT_HTTPHEADER => ['Accept-Encoding:gzip'],
@@ -333,7 +305,7 @@ class Addon extends Backend
         $addons = get_addon_list();
         $list = [];
         foreach ($addons as $k => $v) {
-            if ($search && stripos($v['name'], $search) === false && stripos($v['intro'], $search) === false) {
+            if ($search && stripos($v['name'], $search) === false && stripos($v['title'], $search) === false && stripos($v['intro'], $search) === false) {
                 continue;
             }
 
@@ -366,5 +338,26 @@ class Addon extends Backend
 
         $callback = $this->request->get('callback') ? "jsonp" : "json";
         return $callback($result);
+    }
+
+    /**
+     * 获取插件相关表
+     */
+    public function get_table_list()
+    {
+        $name = $this->request->post("name");
+        if (!preg_match("/^[a-zA-Z0-9]+$/", $name)) {
+            $this->error(__('Addon name incorrect'));
+        }
+        $tables = get_addon_tables($name);
+        $prefix = Config::get('database.prefix');
+        foreach ($tables as $index => $table) {
+            //忽略非插件标识的表名
+            if (!preg_match("/^{$prefix}{$name}/", $table)) {
+                unset($tables[$index]);
+            }
+        }
+        $tables = array_values($tables);
+        $this->success('', null, ['tables' => $tables]);
     }
 }
